@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TITSA Lineas - Mapa y ETAs</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1 class="busHeader" aria-label="Autobus">🚌💨</h1>
+      <p class="headerTag">Navarrete, on the bus?</p>
+    </header>
+
+    <main class="layout">
+      <aside class="panel">
+        <section>
+          <h2>Lineas</h2>
+          <div class="filters">
+            <details id="linePicker" class="linePicker">
+              <summary>Seleccionadas: <span id="linePickerLabel">470</span></summary>
+              <div id="lineOptions" class="lineOptions"></div>
+            </details>
+          </div>
+        </section>
+
+        <section>
+          <h2>El Confital</h2>
+          <div id="confitalSummary" class="confitalBox">Calculando tiempos...</div>
+        </section>
+
+        <section>
+          <h2>Llegar a El Confital</h2>
+          <div class="plannerBox">
+            <label for="fromStopSelect">Desde parada</label>
+            <select id="fromStopSelect" aria-label="Parada origen"></select>
+            <div class="plannerInline">
+              <input id="fromStopIdInput" type="text" inputmode="numeric" placeholder="Nº parada" />
+              <button id="fromStopIdBtn" type="button">Usar</button>
+            </div>
+            <p class="plannerHint">O pulsa en el mapa.</p>
+            <div id="toConfitalResult" class="plannerResult">Calculando...</div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Como llegar</h2>
+          <div class="plannerBox">
+            <label for="placeInput">Lugar (Tenerife)</label>
+            <div class="plannerInline">
+              <input id="placeInput" type="text" placeholder="Ej: El Corte Ingles, Santa Cruz" />
+              <button id="placeSearchBtn" type="button">Buscar</button>
+            </div>
+            <div id="placeRouteResult" class="plannerResult">Escribe un lugar y pulsa Buscar.</div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="mapWrap">
+        <div id="map" aria-label="Mapa de lineas TITSA"></div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

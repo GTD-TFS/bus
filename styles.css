@@ -1,0 +1,222 @@
+:root {
+  --bg: #f2f4f8;
+  --panel: #ffffff;
+  --text: #0f172a;
+  --muted: #4b5563;
+  --line: #0a6e6e;
+  --warn: #92400e;
+  --ok: #14532d;
+  --border: #dbe2ea;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 20% 10%, #ffffff 0%, #f2f4f8 45%, #e8edf5 100%);
+}
+
+.topbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(120deg, #0d9488 0%, #155e75 100%);
+  color: #fff;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.busHeader {
+  font-size: 2.5rem;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+
+.headerTag {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.95;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  height: calc(100vh - 78px);
+}
+
+.panel {
+  padding: 12px;
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.panel section {
+  margin-bottom: 16px;
+}
+
+.filters {
+  display: grid;
+  gap: 8px;
+}
+
+.linePicker {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 6px 8px;
+}
+
+.linePicker summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.lineOptions {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.lineOptions label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: #334155;
+}
+
+.confitalBox {
+  border: 1px solid #f59e0b;
+  background: linear-gradient(135deg, #fffbeb 0%, #fff7d6 100%);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+
+.confitalRow {
+  border: 1px solid #fde68a;
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.confitalRow h3 {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+}
+
+.confitalRow p {
+  margin: 2px 0;
+  color: var(--muted);
+}
+
+.confitalEta {
+  font-weight: 700;
+  color: #92400e;
+}
+
+.plannerBox {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.plannerBox label {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+#fromStopSelect {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 0.9rem;
+}
+
+.plannerResult {
+  font-size: 0.88rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  color: #1f2937;
+}
+
+.plannerInline {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+#fromStopIdInput {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 0.88rem;
+}
+
+#fromStopIdBtn {
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.plannerHint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.mapWrap {
+  position: relative;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+}
+
+.bus-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.2);
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 60vh 40vh;
+  }
+
+  .panel {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
