@@ -58,12 +58,6 @@ const el = {
   linePickerLabel: document.getElementById("linePickerLabel"),
   lineOptions: document.getElementById("lineOptions"),
   confitalSummary: document.getElementById("confitalSummary"),
-  locateBtn: document.getElementById("locateBtn"),
-  locStatus: document.getElementById("locStatus"),
-  toConfitalResult: document.getElementById("toConfitalResult"),
-  placeInput: document.getElementById("placeInput"),
-  placeSearchBtn: document.getElementById("placeSearchBtn"),
-  placeRouteResult: document.getElementById("placeRouteResult"),
   mapWrap: document.querySelector(".mapWrap"),
   mapCloseBtn: document.getElementById("mapCloseBtn"),
   mapExpandHint: document.getElementById("mapExpandHint"),
@@ -82,9 +76,6 @@ async function init() {
   buildGlobalIndexes();
   initControls();
   applyFiltersAndRender(true);
-  const now = getNowForTimezone(state.agencyTimezone);
-  recomputeActiveTripsByService(now);
-  renderToConfitalPlanner(now.seconds);
   state.timer = setInterval(refreshDynamicPanels, CONFIG.refreshMs);
 }
 
@@ -249,37 +240,6 @@ function initControls() {
     state.selectedLines = new Set([picked]);
     syncLinePickerLabel();
     applyFiltersAndRender(true);
-  });
-
-  el.locateBtn.addEventListener("click", requestCurrentLocation);
-  requestCurrentLocation();
-
-  const searchPlace = async () => {
-    const q = String(el.placeInput.value || "").trim();
-    if (!q) return;
-    if (!state.currentOriginStopIds.length) {
-      el.placeRouteResult.textContent = "Primero pulsa: Usar mi ubicacion";
-      return;
-    }
-    el.placeRouteResult.textContent = "Buscando lugar...";
-    try {
-      const targetStopIds = await resolvePlaceToNearestStopIds(q);
-      if (!targetStopIds.length) {
-        el.placeRouteResult.textContent = "Lugar no encontrado";
-        return;
-      }
-      state.placeTargetStopIds = targetStopIds;
-      state.placeTargetLabel = q;
-      const now = getNowForTimezone(state.agencyTimezone);
-      recomputeActiveTripsByService(now);
-      renderPlacePlannerResult(now.seconds);
-    } catch (err) {
-      el.placeRouteResult.textContent = "No se pudo buscar";
-    }
-  };
-  el.placeSearchBtn.addEventListener("click", searchPlace);
-  el.placeInput.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") searchPlace();
   });
 
   syncLinePickerLabel();
@@ -535,8 +495,6 @@ function refreshDynamicPanels() {
   state.lastUpcomingByStop = upcomingByStop;
 
   renderConfitalSummary(upcomingByStop);
-  renderToConfitalPlanner(now.seconds);
-  renderPlacePlannerResult(now.seconds);
   renderBusMarkers(activeTrips);
 }
 
