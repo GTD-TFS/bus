@@ -1,5 +1,5 @@
 const CONFIG = {
-  gtfsZipUrls: ["/data/Google_transit.zip", "https://www.titsa.com/Google_transit.zip"],
+  gtfsZipUrls: ["./data/Google_transit.zip", "https://www.titsa.com/Google_transit.zip"],
   initialLines: ["470"],
   refreshMs: 30_000,
   minutesWindow: 120,
