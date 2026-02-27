@@ -50,6 +50,7 @@ const state = {
   placeTargetStopIds: [],
   placeTargetLabel: "",
   plannerCache: new Map(),
+  geolocationWatchId: null,
   timer: null,
 };
 
@@ -237,18 +238,15 @@ function initControls() {
   el.lineOptions.innerHTML = state.lineOptions
     .map((line) => {
       const checked = state.selectedLines.has(line) ? " checked" : "";
-      return `<label><input type="checkbox" value="${escapeHtml(line)}"${checked}/> ${escapeHtml(line)}</label>`;
+      return `<label><input type="radio" name="line_choice" value="${escapeHtml(line)}"${checked}/> ${escapeHtml(
+        line
+      )}</label>`;
     })
     .join("");
 
   el.lineOptions.addEventListener("change", () => {
-    const picked = [...el.lineOptions.querySelectorAll("input[type='checkbox']:checked")].map((x) => x.value);
-    state.selectedLines = new Set(picked.length ? picked : CONFIG.initialLines);
-    if (!picked.length) {
-      for (const input of el.lineOptions.querySelectorAll("input[type='checkbox']")) {
-        input.checked = state.selectedLines.has(input.value);
-      }
-    }
+    const picked = el.lineOptions.querySelector("input[name='line_choice']:checked")?.value || CONFIG.initialLines[0];
+    state.selectedLines = new Set([picked]);
     syncLinePickerLabel();
     applyFiltersAndRender(true);
   });
@@ -259,6 +257,10 @@ function initControls() {
   const searchPlace = async () => {
     const q = String(el.placeInput.value || "").trim();
     if (!q) return;
+    if (!state.currentOriginStopIds.length) {
+      el.placeRouteResult.textContent = "Primero pulsa: Usar mi ubicacion";
+      return;
+    }
     el.placeRouteResult.textContent = "Buscando lugar...";
     try {
       const targetStopIds = await resolvePlaceToNearestStopIds(q);
@@ -317,35 +319,61 @@ function syncLinePickerLabel() {
 }
 
 function requestCurrentLocation() {
+  if (!window.isSecureContext) {
+    el.locStatus.textContent = "Ubicacion requiere HTTPS";
+    return;
+  }
   if (!navigator.geolocation) {
     el.locStatus.textContent = "Geolocalizacion no disponible";
     return;
   }
+  el.locateBtn.disabled = true;
   el.locStatus.textContent = "Buscando ubicacion...";
+
+  const onSuccess = (pos) => {
+    state.currentPos = {
+      lat: pos.coords.latitude,
+      lon: pos.coords.longitude,
+      accuracy: pos.coords.accuracy,
+    };
+    state.currentOriginStopIds = findNearestPlannerStops(state.currentPos.lat, state.currentPos.lon, 8).map((x) => x.stopId);
+    const nearest = state.currentOriginStopIds[0];
+    const nearestName = nearest ? state.stopById.get(nearest)?.stop_name || nearest : "sin parada";
+    el.locStatus.textContent = `Ubicacion OK (${Math.round(state.currentPos.accuracy)}m) · parada: ${nearestName}`;
+    if (nearest) {
+      state.map.setView([state.currentPos.lat, state.currentPos.lon], 13);
+    }
+    const now = getNowForTimezone(state.agencyTimezone);
+    recomputeActiveTripsByService(now);
+    renderToConfitalPlanner(now.seconds);
+    renderPlacePlannerResult(now.seconds);
+    el.locateBtn.disabled = false;
+  };
+
+  const onError = (err) => {
+    const msg =
+      err?.code === 1
+        ? "Permiso denegado (activalo en Safari > Configuracion > Ubicacion)"
+        : err?.code === 2
+        ? "Ubicacion no disponible"
+        : "Tiempo agotado al localizar";
+    el.locStatus.textContent = msg;
+    el.locateBtn.disabled = false;
+  };
+
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      state.currentPos = {
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
-      };
-      state.currentOriginStopIds = findNearestPlannerStops(state.currentPos.lat, state.currentPos.lon, 8).map((x) => x.stopId);
-      const nearest = state.currentOriginStopIds[0];
-      const nearestName = nearest ? state.stopById.get(nearest)?.stop_name || nearest : "sin parada";
-      el.locStatus.textContent = `Ubicacion OK (${Math.round(state.currentPos.accuracy)}m) · parada cercana: ${nearestName}`;
-      if (nearest) {
-        state.map.setView([state.currentPos.lat, state.currentPos.lon], 13);
-      }
-      const now = getNowForTimezone(state.agencyTimezone);
-      recomputeActiveTripsByService(now);
-      renderToConfitalPlanner(now.seconds);
-      renderPlacePlannerResult(now.seconds);
-    },
-    () => {
-      el.locStatus.textContent = "No se pudo obtener ubicacion";
-    },
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    onSuccess,
+    onError,
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
   );
+
+  if (state.geolocationWatchId == null) {
+    state.geolocationWatchId = navigator.geolocation.watchPosition(
+      onSuccess,
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 20000 }
+    );
+  }
 }
 
 function findNearestPlannerStops(lat, lon, limit = 5) {
