@@ -34,13 +34,8 @@
         <section>
           <h2>Llegar a El Confital</h2>
           <div class="plannerBox">
-            <label for="fromStopSelect">Desde parada</label>
-            <select id="fromStopSelect" aria-label="Parada origen"></select>
-            <div class="plannerInline">
-              <input id="fromStopIdInput" type="text" inputmode="numeric" placeholder="Nº parada" />
-              <button id="fromStopIdBtn" type="button">Usar</button>
-            </div>
-            <p class="plannerHint">O pulsa en el mapa.</p>
+            <button id="locateBtn" type="button">Usar mi ubicacion</button>
+            <div id="locStatus" class="plannerHint">Sin ubicacion</div>
             <div id="toConfitalResult" class="plannerResult">Calculando...</div>
           </div>
         </section>
@@ -59,6 +54,8 @@
       </aside>
 
       <section class="mapWrap">
+        <button id="mapCloseBtn" class="mapCloseBtn" type="button" aria-label="Cerrar mapa">×</button>
+        <button id="mapExpandHint" class="mapExpandHint" type="button">Tocar para ampliar mapa</button>
         <div id="map" aria-label="Mapa de lineas TITSA"></div>
       </section>
     </main>

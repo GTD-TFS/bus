@@ -45,8 +45,10 @@ const state = {
   lastUpcomingByStop: new Map(),
   confitalStops: new Set(),
   plannerStopIds: [],
-  plannerFromStopId: "",
-  placeOriginStopId: "",
+  currentPos: null,
+  currentOriginStopIds: [],
+  placeTargetStopIds: [],
+  placeTargetLabel: "",
   plannerCache: new Map(),
   timer: null,
 };
@@ -55,13 +57,15 @@ const el = {
   linePickerLabel: document.getElementById("linePickerLabel"),
   lineOptions: document.getElementById("lineOptions"),
   confitalSummary: document.getElementById("confitalSummary"),
-  fromStopSelect: document.getElementById("fromStopSelect"),
-  fromStopIdInput: document.getElementById("fromStopIdInput"),
-  fromStopIdBtn: document.getElementById("fromStopIdBtn"),
+  locateBtn: document.getElementById("locateBtn"),
+  locStatus: document.getElementById("locStatus"),
   toConfitalResult: document.getElementById("toConfitalResult"),
   placeInput: document.getElementById("placeInput"),
   placeSearchBtn: document.getElementById("placeSearchBtn"),
   placeRouteResult: document.getElementById("placeRouteResult"),
+  mapWrap: document.querySelector(".mapWrap"),
+  mapCloseBtn: document.getElementById("mapCloseBtn"),
+  mapExpandHint: document.getElementById("mapExpandHint"),
 };
 
 init().catch((err) => {
@@ -71,6 +75,7 @@ init().catch((err) => {
 
 async function init() {
   initMap();
+  initMapExpandControls();
   el.confitalSummary.textContent = "Cargando GTFS...";
   await loadGtfs();
   buildGlobalIndexes();
@@ -96,11 +101,26 @@ function initMap() {
   state.layers.route = L.layerGroup().addTo(state.map);
   state.layers.stops = L.layerGroup().addTo(state.map);
   state.layers.buses = L.layerGroup().addTo(state.map);
+}
 
-  state.map.on("click", (ev) => {
-    const nearest = findNearestPlannerStop(ev.latlng.lat, ev.latlng.lng);
-    if (!nearest) return;
-    setPlannerOrigin(nearest.stopId);
+function initMapExpandControls() {
+  const expand = () => {
+    el.mapWrap.classList.add("expanded");
+    setTimeout(() => state.map?.invalidateSize(), 80);
+  };
+  const close = () => {
+    el.mapWrap.classList.remove("expanded");
+    setTimeout(() => state.map?.invalidateSize(), 80);
+  };
+  el.mapExpandHint.addEventListener("click", expand);
+  el.mapCloseBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    close();
+  });
+  el.mapWrap.addEventListener("click", (ev) => {
+    if (el.mapWrap.classList.contains("expanded")) return;
+    if (ev.target === el.mapCloseBtn) return;
+    expand();
   });
 }
 
@@ -196,7 +216,6 @@ function buildGlobalIndexes() {
       const sb = state.stopById.get(b)?.stop_name || b;
       return sa.localeCompare(sb, "es");
     });
-  state.plannerFromStopId = state.plannerStopIds[0] || "";
 
   state.shapesById = new Map();
   for (const row of state.raw.shapes) {
@@ -212,7 +231,6 @@ function buildGlobalIndexes() {
 
   const validInitial = CONFIG.initialLines.filter((line) => state.lineOptions.includes(line));
   state.selectedLines = new Set(validInitial.length ? validInitial : [state.lineOptions[0]].filter(Boolean));
-  syncPlannerStopOptions();
 }
 
 function initControls() {
@@ -235,48 +253,24 @@ function initControls() {
     applyFiltersAndRender(true);
   });
 
-  el.fromStopSelect.addEventListener("change", (ev) => {
-    setPlannerOrigin(ev.target.value);
-  });
-
-  const applyTypedStop = () => {
-    const stopId = String(el.fromStopIdInput.value || "").trim();
-    if (!stopId) return;
-    if (!state.plannerStopIds.includes(stopId)) {
-      el.toConfitalResult.textContent = "Parada no valida";
-      return;
-    }
-    setPlannerOrigin(stopId);
-  };
-  el.fromStopIdBtn.addEventListener("click", applyTypedStop);
-  el.fromStopIdInput.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") applyTypedStop();
-  });
+  el.locateBtn.addEventListener("click", requestCurrentLocation);
+  requestCurrentLocation();
 
   const searchPlace = async () => {
     const q = String(el.placeInput.value || "").trim();
     if (!q) return;
     el.placeRouteResult.textContent = "Buscando lugar...";
     try {
-      const stopId = await resolvePlaceToNearestStop(q);
-      if (!stopId.length) {
+      const targetStopIds = await resolvePlaceToNearestStopIds(q);
+      if (!targetStopIds.length) {
         el.placeRouteResult.textContent = "Lugar no encontrado";
         return;
       }
+      state.placeTargetStopIds = targetStopIds;
+      state.placeTargetLabel = q;
       const now = getNowForTimezone(state.agencyTimezone);
       recomputeActiveTripsByService(now);
-      let picked = "";
-      let pickedOptions = [];
-      for (const candidate of stopId) {
-        const opts = getBestTripsToConfital(now.seconds, candidate);
-        if (opts.length) {
-          picked = candidate;
-          pickedOptions = opts;
-          break;
-        }
-      }
-      state.placeOriginStopId = picked || stopId[0];
-      renderPlacePlannerResult(now.seconds, pickedOptions);
+      renderPlacePlannerResult(now.seconds);
     } catch (err) {
       el.placeRouteResult.textContent = "No se pudo buscar";
     }
@@ -317,46 +311,41 @@ function buildFilteredIndexes() {
   }
 }
 
-function syncPlannerStopOptions() {
-  const ids = state.plannerStopIds;
-  if (!ids.length) {
-    el.fromStopSelect.innerHTML = '<option value="">Sin paradas</option>';
-    state.plannerFromStopId = "";
-    return;
-  }
-
-  if (!ids.includes(state.plannerFromStopId)) {
-    state.plannerFromStopId = ids[0];
-  }
-
-  const html = ids
-    .map((stopId) => {
-      const stopName = state.stopById.get(stopId)?.stop_name || stopId;
-      const selected = stopId === state.plannerFromStopId ? " selected" : "";
-      return `<option value="${escapeHtml(stopId)}"${selected}>${escapeHtml(stopName)} (${escapeHtml(stopId)})</option>`;
-    })
-    .join("");
-  el.fromStopSelect.innerHTML = html;
-  el.fromStopIdInput.value = state.plannerFromStopId;
-}
-
 function syncLinePickerLabel() {
   const txt = [...state.selectedLines].sort(sortLineNames).join(", ");
   el.linePickerLabel.textContent = txt || CONFIG.initialLines.join(", ");
 }
 
-function setPlannerOrigin(stopId) {
-  if (!state.plannerStopIds.includes(stopId)) return;
-  state.plannerFromStopId = stopId;
-  el.fromStopSelect.value = stopId;
-  el.fromStopIdInput.value = stopId;
-  const now = getNowForTimezone(state.agencyTimezone);
-  recomputeActiveTripsByService(now);
-  renderToConfitalPlanner(now.seconds);
-}
-
-function findNearestPlannerStop(lat, lon) {
-  return findNearestPlannerStops(lat, lon, 1)[0] || null;
+function requestCurrentLocation() {
+  if (!navigator.geolocation) {
+    el.locStatus.textContent = "Geolocalizacion no disponible";
+    return;
+  }
+  el.locStatus.textContent = "Buscando ubicacion...";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      state.currentPos = {
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      };
+      state.currentOriginStopIds = findNearestPlannerStops(state.currentPos.lat, state.currentPos.lon, 8).map((x) => x.stopId);
+      const nearest = state.currentOriginStopIds[0];
+      const nearestName = nearest ? state.stopById.get(nearest)?.stop_name || nearest : "sin parada";
+      el.locStatus.textContent = `Ubicacion OK (${Math.round(state.currentPos.accuracy)}m) · parada cercana: ${nearestName}`;
+      if (nearest) {
+        state.map.setView([state.currentPos.lat, state.currentPos.lon], 13);
+      }
+      const now = getNowForTimezone(state.agencyTimezone);
+      recomputeActiveTripsByService(now);
+      renderToConfitalPlanner(now.seconds);
+      renderPlacePlannerResult(now.seconds);
+    },
+    () => {
+      el.locStatus.textContent = "No se pudo obtener ubicacion";
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+  );
 }
 
 function findNearestPlannerStops(lat, lon, limit = 5) {
@@ -378,7 +367,7 @@ function squaredDistance(lat1, lon1, lat2, lon2) {
   return dy * dy + dx * dx;
 }
 
-async function resolvePlaceToNearestStop(query) {
+async function resolvePlaceToNearestStopIds(query) {
   const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=es&q=${encodeURIComponent(
     `${query}, Tenerife`
   )}`;
@@ -396,33 +385,41 @@ async function resolvePlaceToNearestStop(query) {
   return nearest.map((x) => x.stopId);
 }
 
-function renderPlacePlannerResult(nowSec = null, precomputedOptions = null) {
-  if (!state.placeOriginStopId) return;
-  const stop = state.stopById.get(state.placeOriginStopId);
-  const stopName = stop?.stop_name || state.placeOriginStopId;
+function renderPlacePlannerResult(nowSec = null) {
+  if (!state.currentOriginStopIds.length || !state.placeTargetStopIds.length) return;
   const refSec = Number.isFinite(nowSec) ? nowSec : getNowForTimezone(state.agencyTimezone).seconds;
-  const options = (precomputedOptions || getBestTripsToConfital(refSec, state.placeOriginStopId)).slice(0, 1);
-  if (!options.length) {
-    el.placeRouteResult.innerHTML = `Origen cercano: ${escapeHtml(stopName)} (${escapeHtml(
-      state.placeOriginStopId
-    )})<br/>Sin ruta ahora`;
+  const best = findBestRouteFromCurrent(refSec, new Set(state.placeTargetStopIds));
+  if (!best) {
+    el.placeRouteResult.innerHTML = `Destino: ${escapeHtml(state.placeTargetLabel || "lugar")}<br/>Sin ruta ahora`;
     return;
   }
-  const opt = options[0];
-  const dest = CONFIG.confitalDirectionByStop[opt.confitalStopId] || "El Confital";
+  const originStopName = state.stopById.get(best.originStopId)?.stop_name || best.originStopId;
+  const targetStopName = state.stopById.get(best.targetStopId)?.stop_name || best.targetStopId;
+  const opt = best.option;
   const approx = opt.fallback ? " (aprox)" : "";
   if (opt.mode === "direct") {
-    el.placeRouteResult.innerHTML = `Origen cercano: ${escapeHtml(stopName)} (${escapeHtml(
-      state.placeOriginStopId
-    )})${approx}<br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(opt.line1)}<br/>3) Baja en ${escapeHtml(dest)}`;
+    el.placeRouteResult.innerHTML = `Origen: ${escapeHtml(originStopName)}${approx}<br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(
+      opt.line1
+    )}<br/>3) Baja en ${escapeHtml(targetStopName)}`;
     return;
   }
   const transferName = state.stopById.get(opt.transferStopId)?.stop_name || opt.transferStopId;
-  el.placeRouteResult.innerHTML = `Origen cercano: ${escapeHtml(stopName)} (${escapeHtml(
-    state.placeOriginStopId
-  )})${approx}<br/>1) Espera ${opt.waitMin} min<br/>2) L${escapeHtml(opt.line1)} hasta ${escapeHtml(
-    transferName
-  )}<br/>3) Cambia a L${escapeHtml(opt.line2)}<br/>4) Baja en ${escapeHtml(dest)}`;
+  el.placeRouteResult.innerHTML = `Origen: ${escapeHtml(originStopName)}${approx}<br/>1) Espera ${opt.waitMin} min<br/>2) L${escapeHtml(
+    opt.line1
+  )} hasta ${escapeHtml(transferName)}<br/>3) Cambia a L${escapeHtml(opt.line2)}<br/>4) Baja en ${escapeHtml(targetStopName)}`;
+}
+
+function findBestRouteFromCurrent(nowSec, targetStopSet) {
+  let best = null;
+  for (const originStopId of state.currentOriginStopIds) {
+    const options = getBestTripsToTargets(nowSec, originStopId, targetStopSet);
+    if (!options.length) continue;
+    const opt = options[0];
+    if (!best || opt.totalMin < best.option.totalMin) {
+      best = { originStopId, option: opt, targetStopId: opt.targetStopId };
+    }
+  }
+  return best;
 }
 
 function renderStaticLayers(fitMap = false) {
@@ -490,9 +487,6 @@ function renderStaticLayers(fitMap = false) {
     });
 
     marker.on("click", () => {
-      if (!state.confitalStops.has(stopId)) {
-        setPlannerOrigin(stopId);
-      }
       marker.bindPopup(buildStopPopup(stopId)).openPopup();
     });
 
@@ -513,6 +507,8 @@ function refreshDynamicPanels() {
   state.lastUpcomingByStop = upcomingByStop;
 
   renderConfitalSummary(upcomingByStop);
+  renderToConfitalPlanner(now.seconds);
+  renderPlacePlannerResult(now.seconds);
   renderBusMarkers(activeTrips);
 }
 
@@ -637,55 +633,44 @@ function renderConfitalSummary(upcomingByStop) {
 }
 
 function renderToConfitalPlanner(nowSec) {
-  if (!state.plannerFromStopId) {
-    el.toConfitalResult.textContent = "Selecciona parada";
+  if (!state.currentOriginStopIds.length) {
+    el.toConfitalResult.textContent = "Pulsa: Usar mi ubicacion";
     return;
   }
-
-  const fromStopName = state.stopById.get(state.plannerFromStopId)?.stop_name || state.plannerFromStopId;
-  const options = getBestTripsToConfital(nowSec, state.plannerFromStopId);
-
-  if (!options.length) {
-    el.toConfitalResult.innerHTML = `Origen: ${escapeHtml(fromStopName)} (${escapeHtml(
-      state.plannerFromStopId
-    )})<br/>Sin ruta ahora`;
+  const best = findBestRouteFromCurrent(nowSec, state.confitalStops);
+  if (!best) {
+    el.toConfitalResult.innerHTML = "Sin ruta ahora";
     return;
   }
-
-  el.toConfitalResult.innerHTML = options
-    .slice(0, 3)
-    .map((opt, idx) => {
-      const dest = CONFIG.confitalDirectionByStop[opt.confitalStopId] || "El Confital";
-      const head = `Opcion ${idx + 1}: ${opt.totalMin} min${opt.fallback ? " (aprox)" : ""}`;
-      if (opt.mode === "direct") {
-        return `<strong>${head}</strong><br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(
-          opt.line1
-        )}<br/>3) Baja en ${escapeHtml(dest)} (${escapeHtml(opt.confitalStopId)})`;
-      }
-      const transferName = state.stopById.get(opt.transferStopId)?.stop_name || opt.transferStopId;
-      return `<strong>${head}</strong><br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(
-        opt.line1
-      )} hasta ${escapeHtml(transferName)}<br/>3) Cambia a L${escapeHtml(opt.line2)}<br/>4) Baja en ${escapeHtml(
-        dest
-      )} (${escapeHtml(opt.confitalStopId)})`;
-    })
-    .join("<br/><br/>");
-  el.toConfitalResult.innerHTML = `Origen: ${escapeHtml(fromStopName)} (${escapeHtml(
-    state.plannerFromStopId
-  )})<br/><br/>${el.toConfitalResult.innerHTML}`;
+  const fromStopName = state.stopById.get(best.originStopId)?.stop_name || best.originStopId;
+  const opt = best.option;
+  const dest = CONFIG.confitalDirectionByStop[best.targetStopId] || "El Confital";
+  const head = `Opcion: ${opt.totalMin} min${opt.fallback ? " (aprox)" : ""}`;
+  if (opt.mode === "direct") {
+    el.toConfitalResult.innerHTML = `<strong>${head}</strong><br/>Origen: ${escapeHtml(
+      fromStopName
+    )}<br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(opt.line1)}<br/>3) Baja en ${escapeHtml(dest)}`;
+    return;
+  }
+  const transferName = state.stopById.get(opt.transferStopId)?.stop_name || opt.transferStopId;
+  el.toConfitalResult.innerHTML = `<strong>${head}</strong><br/>Origen: ${escapeHtml(
+    fromStopName
+  )}<br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(opt.line1)} hasta ${escapeHtml(
+    transferName
+  )}<br/>3) Cambia a L${escapeHtml(opt.line2)}<br/>4) Baja en ${escapeHtml(dest)}`;
 }
 
-function getBestTripsToConfital(nowSec, fromStopId) {
-  const key = `${fromStopId}|${Math.floor(nowSec / 60)}`;
+function getBestTripsToTargets(nowSec, fromStopId, targetStopSet) {
+  const targetKey = [...targetStopSet].sort().join(",");
+  const key = `${fromStopId}|${targetKey}|${Math.floor(nowSec / 60)}`;
   const cached = state.plannerCache.get(key);
   if (cached) return cached;
-
-  const strict = computeTripsToConfital(nowSec, fromStopId, { strictService: true, wrapToNextDay: false });
+  const strict = computeTripsToTargets(nowSec, fromStopId, targetStopSet, { strictService: true, wrapToNextDay: false });
   if (strict.length) {
     state.plannerCache.set(key, strict);
     return strict;
   }
-  const fallback = computeTripsToConfital(nowSec, fromStopId, { strictService: false, wrapToNextDay: true }).map((x) => ({
+  const fallback = computeTripsToTargets(nowSec, fromStopId, targetStopSet, { strictService: false, wrapToNextDay: true }).map((x) => ({
     ...x,
     fallback: true,
   }));
@@ -697,7 +682,7 @@ function getBestTripsToConfital(nowSec, fromStopId) {
   return fallback;
 }
 
-function computeTripsToConfital(nowSec, fromStopId, opts = {}) {
+function computeTripsToTargets(nowSec, fromStopId, targetStopSet, opts = {}) {
   const strictService = opts.strictService !== false;
   const wrapToNextDay = opts.wrapToNextDay === true;
   const maxSec = nowSec + (wrapToNextDay ? 36 * 3600 : CONFIG.plannerWindowMinutes * 60);
@@ -716,7 +701,7 @@ function computeTripsToConfital(nowSec, fromStopId, opts = {}) {
     if (!trip1) continue;
     const line1 = state.routeById.get(trip1.route_id)?.route_short_name || "?";
 
-    const direct = findNextConfitalInTrip(leg1.arr, leg1.idx + 1);
+    const direct = findNextTargetInTrip(leg1.arr, leg1.idx + 1, targetStopSet);
     if (direct) {
       let directArr = direct.arrSec;
       if (wrapToNextDay) {
@@ -730,7 +715,7 @@ function computeTripsToConfital(nowSec, fromStopId, opts = {}) {
           line1,
           waitMin: Math.ceil((leg1.depSec - nowSec) / 60),
           totalMin: Math.ceil((directArr - nowSec) / 60),
-          confitalStopId: direct.stopId,
+          targetStopId: direct.stopId,
           depSec: leg1.depSec,
         });
       }
@@ -739,7 +724,7 @@ function computeTripsToConfital(nowSec, fromStopId, opts = {}) {
     const maxIdx = Math.min(leg1.arr.length - 1, leg1.idx + CONFIG.maxTransferStopsFromOrigin);
     for (let i = leg1.idx + 1; i <= maxIdx; i++) {
       const transferStopId = leg1.arr[i].stop_id;
-      if (state.confitalStops.has(transferStopId)) continue;
+      if (targetStopSet.has(transferStopId)) continue;
       let arriveTransferSec = parseGtfsTime(leg1.arr[i].arrival_time || leg1.arr[i].departure_time);
       if (wrapToNextDay) {
         while (arriveTransferSec < leg1.depSec) arriveTransferSec += 24 * 3600;
@@ -757,7 +742,7 @@ function computeTripsToConfital(nowSec, fromStopId, opts = {}) {
         const arr2 = ev2.arr;
         const dep2 = ev2.depSec;
 
-        const conf2 = findNextConfitalInTrip(arr2, ev2.idx + 1);
+        const conf2 = findNextTargetInTrip(arr2, ev2.idx + 1, targetStopSet);
         const trip2 = state.tripById.get(ev2.tripId);
         if (!trip2) continue;
         const line2 = state.routeById.get(trip2.route_id)?.route_short_name || "?";
@@ -776,7 +761,7 @@ function computeTripsToConfital(nowSec, fromStopId, opts = {}) {
               transferStopId,
               waitMin: Math.ceil((leg1.depSec - nowSec) / 60),
               totalMin: Math.ceil((conf2Arr - nowSec) / 60),
-              confitalStopId: conf2.stopId,
+              targetStopId: conf2.stopId,
               depSec: leg1.depSec,
             });
           }
@@ -797,12 +782,13 @@ function computeTripsToConfital(nowSec, fromStopId, opts = {}) {
   return out;
 }
 
-function findNextConfitalInTrip(stopTimes, fromIdx) {
+function findNextTargetInTrip(stopTimes, fromIdx, targetStopSet) {
   for (let i = fromIdx; i < stopTimes.length; i++) {
-    if (!state.confitalStops.has(stopTimes[i].stop_id)) continue;
+    const sid = stopTimes[i].stop_id;
+    if (!targetStopSet.has(sid)) continue;
     const arrSec = parseGtfsTime(stopTimes[i].arrival_time || stopTimes[i].departure_time);
     if (!Number.isFinite(arrSec)) continue;
-    return { stopId: stopTimes[i].stop_id, arrSec };
+    return { stopId: sid, arrSec };
   }
   return null;
 }

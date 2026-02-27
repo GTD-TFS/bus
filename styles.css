@@ -46,13 +46,15 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(320px, 420px) 1fr;
-  height: calc(100vh - 78px);
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding: 12px;
 }
 
 .panel {
   padding: 12px;
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   overflow: auto;
   background: rgba(255, 255, 255, 0.95);
 }
@@ -193,11 +195,59 @@ body {
 
 .mapWrap {
   position: relative;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  height: 240px;
+  background: #fff;
 }
 
 #map {
   width: 100%;
   height: 100%;
+}
+
+.mapWrap.expanded {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  z-index: 9999;
+}
+
+.mapCloseBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10001;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 1.5rem;
+  line-height: 1;
+  display: none;
+}
+
+.mapWrap.expanded .mapCloseBtn {
+  display: block;
+}
+
+.mapExpandHint {
+  position: absolute;
+  inset: auto 10px 10px 10px;
+  z-index: 10000;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 8px 10px;
+  font-size: 0.86rem;
+}
+
+.mapWrap.expanded .mapExpandHint {
+  display: none;
 }
 
 .bus-dot {
@@ -212,11 +262,10 @@ body {
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
-    grid-template-rows: 60vh 40vh;
+    padding: 10px;
   }
 
   .panel {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+    border: 1px solid var(--border);
   }
 }
