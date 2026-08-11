@@ -628,11 +628,14 @@ function renderConfitalSummary(upcomingByStop) {
       }
 
       const first = row.items[0];
-      const short = row.items.map((it) => `${it.etaMin}m`).join(" · ");
+      const later = row.items
+        .slice(1)
+        .map((it) => `${it.etaMin}m`)
+        .join(" · ");
       return `<article class="confitalRow"><h3>${escapeHtml(row.stopName)} (${escapeHtml(
         row.stopId
       )})</h3><p>${escapeHtml(fixedDest)}</p><p><span class="confitalEta">${first.etaMin} min</span> · ${escapeHtml(
-        short
+        later ? `Después: ${later}` : "Sin más llegadas próximas"
       )}</p></article>`;
     })
     .join("");
@@ -842,12 +845,13 @@ function renderBusMarkers(activeTrips) {
             <span class="bus-marker-arrow" style="transform: rotate(${t.pos.bearing}deg)">➤</span>
             <span class="bus-marker-emoji">🚌</span>
           </div>
+          <div class="bus-marker-connector" aria-hidden="true"></div>
           <div class="bus-marker-label"><strong>L${escapeHtml(t.line)}</strong><span>Hacia ${escapeHtml(
           t.headsign
         )}</span></div>
         </div>`,
-        iconSize: [220, 52],
-        iconAnchor: [26, 26],
+        iconSize: [160, 96],
+        iconAnchor: [80, 24],
       }),
     });
 
