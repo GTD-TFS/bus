@@ -433,7 +433,7 @@ function renderStaticLayers(fitMap = false) {
   for (const shapeId of topShapes) {
     const pts = (state.shapesById.get(shapeId) || []).map((p) => [Number(p.shape_pt_lat), Number(p.shape_pt_lon)]);
     if (pts.length > 1) {
-      L.polyline(pts, { color: "#0a6e6e", weight: 4, opacity: 0.8 }).addTo(state.layers.route);
+      drawHighlightedRoute(pts);
     }
   }
 
@@ -445,7 +445,7 @@ function renderStaticLayers(fitMap = false) {
       .filter(Boolean)
       .map((s) => [Number(s.stop_lat), Number(s.stop_lon)]);
     if (pts.length > 1) {
-      L.polyline(pts, { color: "#0a6e6e", weight: 4, opacity: 0.8 }).addTo(state.layers.route);
+      drawHighlightedRoute(pts);
     }
   }
 
@@ -484,6 +484,25 @@ function renderStaticLayers(fitMap = false) {
   if (fitMap && bounds.length) {
     state.map.fitBounds(bounds, { padding: [24, 24] });
   }
+}
+
+function drawHighlightedRoute(points) {
+  const isLine470 = state.selectedLines.has("470");
+  const routeColor = isLine470 ? "#f97316" : "#0a6e6e";
+
+  L.polyline(points, {
+    color: "#ffffff",
+    weight: isLine470 ? 11 : 8,
+    opacity: 0.95,
+    interactive: false,
+  }).addTo(state.layers.route);
+
+  L.polyline(points, {
+    color: routeColor,
+    weight: isLine470 ? 7 : 5,
+    opacity: 1,
+    interactive: false,
+  }).addTo(state.layers.route);
 }
 
 function refreshDynamicPanels() {
@@ -529,6 +548,7 @@ function computeActiveTrips(nowSec) {
 
     list.push({
       tripId,
+      line: state.routeById.get(meta.route_id)?.route_short_name || "?",
       headsign: meta.trip_headsign || "Sin headsign",
       direction: directionLabel(meta.direction_id),
       nextStopName: nextStop?.stop_name || nextStopRow.stop_id,
@@ -814,11 +834,20 @@ function renderBusMarkers(activeTrips) {
     if (!t.pos) continue;
 
     const marker = L.marker([t.pos.lat, t.pos.lon], {
+      zIndexOffset: 1000,
       icon: L.divIcon({
-        className: "",
-        html: '<div class="bus-dot"></div>',
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
+        className: "bus-map-icon",
+        html: `<div class="bus-marker">
+          <div class="bus-marker-symbol" aria-hidden="true">
+            <span class="bus-marker-arrow" style="transform: rotate(${t.pos.bearing}deg)">➤</span>
+            <span class="bus-marker-emoji">🚌</span>
+          </div>
+          <div class="bus-marker-label"><strong>L${escapeHtml(t.line)}</strong><span>Hacia ${escapeHtml(
+          t.headsign
+        )}</span></div>
+        </div>`,
+        iconSize: [220, 52],
+        iconAnchor: [26, 26],
       }),
     });
 
@@ -887,7 +916,18 @@ function estimateTripPosition(stopTimes, nowSec) {
   return {
     lat: lat0 + (lat1 - lat0) * clamped,
     lon: lon0 + (lon1 - lon0) * clamped,
+    bearing: bearingBetweenPoints(lat0, lon0, lat1, lon1),
   };
+}
+
+function bearingBetweenPoints(lat0, lon0, lat1, lon1) {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const y = Math.sin(toRad(lon1 - lon0)) * Math.cos(toRad(lat1));
+  const x =
+    Math.cos(toRad(lat0)) * Math.sin(toRad(lat1)) -
+    Math.sin(toRad(lat0)) * Math.cos(toRad(lat1)) * Math.cos(toRad(lon1 - lon0));
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return Number.isFinite(bearing) ? (bearing + 360) % 360 : 0;
 }
 
 function getActiveServiceIds(dateYYYYMMDD, weekday) {
