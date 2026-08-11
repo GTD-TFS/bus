@@ -53,6 +53,13 @@
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           let refreshing = false;
+          let registrationRef = null;
+
+          const checkForUpdates = () => {
+            if (!registrationRef || document.visibilityState === 'hidden') return;
+            registrationRef.update().catch(() => {});
+          };
+
           navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (refreshing) return;
             refreshing = true;
@@ -61,8 +68,15 @@
 
           navigator.serviceWorker
             .register('./sw.js', { updateViaCache: 'none' })
-            .then((registration) => registration.update())
+            .then((registration) => {
+              registrationRef = registration;
+              return registration.update();
+            })
             .catch(() => {});
+
+          document.addEventListener('visibilitychange', checkForUpdates);
+          window.addEventListener('pageshow', checkForUpdates);
+          window.setInterval(checkForUpdates, 5 * 60 * 1000);
         });
       }
     </script>
