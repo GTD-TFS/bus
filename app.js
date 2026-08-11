@@ -622,7 +622,7 @@ function renderConfitalSummary(upcomingByStop) {
     .map((row) => {
       const fixedDest = CONFIG.confitalDirectionByStop[row.stopId] || "Destino";
       if (!row.items.length) {
-        return `<article class="confitalRow"><h3>${escapeHtml(row.stopName)} (${escapeHtml(
+        return `<article class="confitalRow"><h3>🏠 ${escapeHtml(row.stopName)} (${escapeHtml(
           row.stopId
         )})</h3><p>${escapeHtml(fixedDest)}</p><p>Sin ETA</p></article>`;
       }
@@ -632,7 +632,7 @@ function renderConfitalSummary(upcomingByStop) {
         .slice(1)
         .map((it) => `${it.etaMin}m`)
         .join(" · ");
-      return `<article class="confitalRow"><h3>${escapeHtml(row.stopName)} (${escapeHtml(
+      return `<article class="confitalRow"><h3>🏠 ${escapeHtml(row.stopName)} (${escapeHtml(
         row.stopId
       )})</h3><p>${escapeHtml(fixedDest)}</p><p><span class="confitalEta">${first.etaMin} min</span> · ${escapeHtml(
         later ? `Después: ${later}` : "Sin más llegadas próximas"
