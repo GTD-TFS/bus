@@ -466,13 +466,23 @@ function renderStaticLayers(fitMap = false) {
     bounds.push([lat, lon]);
 
     const isConfital = state.confitalStops.has(stopId);
-    const marker = L.circleMarker([lat, lon], {
-      radius: isConfital ? 7 : 4,
-      color: isConfital ? "#b45309" : "#1d4ed8",
-      fillColor: isConfital ? "#f59e0b" : "#60a5fa",
-      fillOpacity: 0.9,
-      weight: isConfital ? 2 : 1,
-    });
+    const marker = isConfital
+      ? L.marker([lat, lon], {
+          zIndexOffset: 800,
+          icon: L.divIcon({
+            className: "confital-map-icon",
+            html: '<div class="confital-home-marker" aria-label="El Confital">🏠</div>',
+            iconSize: [38, 38],
+            iconAnchor: [19, 19],
+          }),
+        })
+      : L.circleMarker([lat, lon], {
+          radius: 4,
+          color: "#1d4ed8",
+          fillColor: "#60a5fa",
+          fillOpacity: 0.9,
+          weight: 1,
+        });
 
     marker.on("click", () => {
       marker.bindPopup(buildStopPopup(stopId)).openPopup();

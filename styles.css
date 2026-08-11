@@ -196,6 +196,24 @@ body {
   border: 0;
 }
 
+.confital-map-icon {
+  background: transparent;
+  border: 0;
+}
+
+.confital-home-marker {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #fbbf24;
+  font-size: 23px;
+  line-height: 1;
+  box-shadow: 0 0 0 2px #92400e, 0 3px 7px rgba(15, 23, 42, 0.35);
+}
+
 .bus-marker {
   display: flex;
   flex-direction: column;
