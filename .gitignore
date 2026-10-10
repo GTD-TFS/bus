@@ -1,0 +1,12 @@
+# Archivos locales y temporales que no se suben
+.DS_Store
+node_modules/
+.firebase/
+.pepi-backups/
+*.log
+.env
+.env.*
+!.env.example
+**/.gradle/
+**/build/
+dist/
