@@ -348,12 +348,8 @@ body {
 }
 
 .busStopPopup .leaflet-popup-content {
-  min-width: 230px;
-  max-height: 175px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  margin: 15px 14px 13px;
+  min-width: 0;
+  margin: 9px 10px 8px;
   color: var(--text);
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
@@ -369,62 +365,55 @@ body {
 }
 
 .stopPopup {
-  min-width: 230px;
+  min-width: 0;
 }
 
 .stopPopupKicker {
-  margin: 0 40px 4px 0;
+  margin: 0 38px 2px 0;
   color: var(--line);
-  font-size: 0.78rem;
+  font-size: 0.66rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 
 .stopPopupTitle {
   margin: 0;
-  padding-right: 22px;
-  font-size: 1.18rem;
-  line-height: 1.25;
+  padding-right: 30px;
+  font-size: 1rem;
+  line-height: 1.15;
   overflow-wrap: anywhere;
-}
-
-.stopPopupSubheading {
-  margin: 13px 0 7px;
-  color: var(--muted);
-  font-size: 0.86rem;
-  font-weight: 700;
 }
 
 .stopArrivalList {
   display: grid;
-  gap: 7px;
-  margin: 0;
+  gap: 5px;
+  margin: 7px 0 0;
   padding: 0;
   list-style: none;
 }
 
 .stopArrival {
   display: grid;
-  grid-template-columns: 70px minmax(0, 1fr) 62px;
+  grid-template-columns: 58px minmax(0, 1fr) 52px;
   align-items: center;
-  gap: 7px;
-  min-height: 74px;
-  padding: 9px;
+  gap: 5px;
+  min-height: 48px;
+  padding: 5px;
   border: 1px solid #dce8e8;
-  border-radius: 11px;
+  border-radius: 8px;
   background: #f8fbfb;
 }
 
 .stopLineBadge {
   display: grid;
   place-items: center;
-  min-height: 44px;
-  padding: 5px;
-  border-radius: 8px;
+  min-height: 34px;
+  padding: 3px;
+  border-radius: 6px;
   background: #075c55;
   color: #fff;
   text-align: center;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   font-weight: 800;
   line-height: 1.15;
 }
@@ -432,20 +421,20 @@ body {
 .stopDestination {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: 1px;
 }
 
 .stopFieldLabel {
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: 0.62rem;
   font-weight: 750;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
 .stopDestination strong {
-  font-size: 1rem;
-  line-height: 1.25;
+  font-size: 0.86rem;
+  line-height: 1.1;
   overflow-wrap: anywhere;
 }
 
@@ -458,37 +447,30 @@ body {
 }
 
 .stopEtaCaption {
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.02em;
   line-height: 1.05;
 }
 
 .stopEta strong {
-  font-size: 1.15rem;
+  font-size: 1rem;
   line-height: 1.05;
 }
 
 .stopEtaUnit {
-  font-size: 0.74rem;
+  font-size: 0.64rem;
   font-weight: 750;
 }
 
-.stopPopupFoot {
-  margin: 9px 1px 0;
-  color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.35;
-}
-
 .stopEmpty {
-  margin-top: 10px;
-  padding: 10px;
-  border-radius: 9px;
+  margin-top: 6px;
+  padding: 7px;
+  border-radius: 7px;
   background: #fff8e7;
   color: #704412;
-  font-size: 0.9rem;
-  line-height: 1.4;
+  font-size: 0.78rem;
+  line-height: 1.25;
 }
 
 .dataNotice {

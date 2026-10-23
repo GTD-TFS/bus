@@ -489,9 +489,9 @@ function renderStaticLayers(fitMap = false) {
     marker.bindPopup(buildStopPopup(stopId), {
       className: "busStopPopup",
       closeButton: true,
-      maxWidth: 340,
-      minWidth: 260,
-      autoPanPadding: [20, 24],
+      maxWidth: 320,
+      minWidth: 240,
+      autoPanPadding: [12, 16],
     });
 
     marker.addTo(state.layers.stops);
@@ -898,13 +898,13 @@ function buildStopPopup(stopId) {
   if (!items.length) {
     return `<div class="stopPopup"><p class="stopPopupKicker">PARADA ${escapeHtml(
       stopNumber
-    )}</p><h2 class="stopPopupTitle">${title}</h2><div class="stopEmpty">No hay salidas próximas para la línea ${escapeHtml(
+    )}</p><h2 class="stopPopupTitle">${title}</h2><div class="stopEmpty">Sin próximas guaguas de la línea ${escapeHtml(
       line
-    )} en el horario de hoy.</div><p class="stopPopupFoot">Puede haber cambios o retrasos.</p></div>`;
+    )}.</div></div>`;
   }
 
   const rows = items
-    .slice(0, 5)
+    .slice(0, 2)
     .map((it) => {
       const eta = it.etaMin === 0 ? "Ahora" : String(it.etaMin);
       const unit = it.etaMin === 0 ? "" : "min";
@@ -919,7 +919,7 @@ function buildStopPopup(stopId) {
 
   return `<div class="stopPopup"><p class="stopPopupKicker">PARADA ${escapeHtml(
     stopNumber
-  )}</p><h2 class="stopPopupTitle">${title}</h2><p class="stopPopupSubheading">Próximas guaguas</p><ul class="stopArrivalList">${rows}</ul><p class="stopPopupFoot">Minutos según el horario; puede haber retrasos.</p></div>`;
+  )}</p><h2 class="stopPopupTitle">${title}</h2><ul class="stopArrivalList">${rows}</ul></div>`;
 }
 
 function getActiveServiceIds(dateYYYYMMDD, weekday) {
