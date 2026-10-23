@@ -11,7 +11,9 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" />
     <link rel="preconnect" href="https://unpkg.com" />
+    <link rel="preconnect" href="https://tiles.openfreemap.org" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -36,6 +38,7 @@
           <h2>El Confital</h2>
           <div id="confitalSummary" class="confitalBox">Calculando tiempos...</div>
         </section>
+        <div id="dataNotice" class="dataNotice" role="status">Comprobando el horario incluido...</div>
       </aside>
 
       <section class="mapWrap">
@@ -46,9 +49,11 @@
     </main>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-    <script type="module" src="./app.js"></script>
+    <script src="./app.js"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

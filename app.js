@@ -25,7 +25,6 @@ const state = {
   layers: {
     route: null,
     stops: null,
-    buses: null,
   },
   agencyTimezone: "Atlantic/Canary",
   routeById: new Map(),
@@ -40,43 +39,55 @@ const state = {
   filteredTrips: [],
   filteredStopTimesByTrip: new Map(),
   activeServiceIds: new Set(),
+  previousActiveServiceIds: new Set(),
   activeTripIds: new Set(),
+  maxServiceTimeSec: 0,
+  feedServiceRange: null,
   lineOptions: [],
   lastUpcomingByStop: new Map(),
+  stopMarkers: new Map(),
   confitalStops: new Set(),
   plannerStopIds: [],
   currentPos: null,
   currentOriginStopIds: [],
-  placeTargetStopIds: [],
-  placeTargetLabel: "",
   plannerCache: new Map(),
-  geolocationWatchId: null,
+  userLocationMarker: null,
   timer: null,
 };
 
 const el = {
   linePickerLabel: document.getElementById("linePickerLabel"),
   lineOptions: document.getElementById("lineOptions"),
+  linePicker: document.getElementById("linePicker"),
   confitalSummary: document.getElementById("confitalSummary"),
+  dataNotice: document.getElementById("dataNotice"),
   mapWrap: document.querySelector(".mapWrap"),
   mapCloseBtn: document.getElementById("mapCloseBtn"),
   mapExpandHint: document.getElementById("mapExpandHint"),
 };
 
 init().catch((err) => {
-  el.confitalSummary.textContent = `Error: ${err.message}`;
+  el.confitalSummary.textContent = "No se pudieron cargar los horarios.";
+  el.dataNotice.textContent = window.location.protocol === "file:"
+    ? "No pude abrir el horario guardado junto a la app. Comprueba que la carpeta data sigue junto a index.html."
+    : "No pude cargar los horarios. Comprueba la conexión y vuelve a cargar la página.";
   console.error(err);
 });
 
 async function init() {
   initMap();
   initMapExpandControls();
-  el.confitalSummary.textContent = "Cargando GTFS...";
+  el.confitalSummary.textContent = "Cargando horarios...";
   await loadGtfs();
+  await finishStartup();
+}
+
+async function finishStartup() {
+  state.feedServiceRange = getFeedServiceDateRange();
   buildGlobalIndexes();
   initControls();
   applyFiltersAndRender(true);
-  state.timer = setInterval(refreshDynamicPanels, CONFIG.refreshMs);
+  if (!state.timer) state.timer = setInterval(refreshDynamicPanels, CONFIG.refreshMs);
 }
 
 function initMap() {
@@ -85,14 +96,12 @@ function initMap() {
     preferCanvas: true,
   }).setView([28.33, -16.51], 11);
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  L.maplibreGL({
+    style: "https://tiles.openfreemap.org/styles/liberty",
   }).addTo(state.map);
 
   state.layers.route = L.layerGroup().addTo(state.map);
   state.layers.stops = L.layerGroup().addTo(state.map);
-  state.layers.buses = L.layerGroup().addTo(state.map);
 }
 
 function initMapExpandControls() {
@@ -117,8 +126,9 @@ function initMapExpandControls() {
 }
 
 async function loadGtfs() {
-  const zipData = await fetchGtfsZipData();
-  const zip = await JSZip.loadAsync(zipData);
+  const zip = window.location.protocol === "file:"
+    ? await loadBundledGtfsArchive()
+    : await JSZip.loadAsync(await fetchGtfsZipData());
 
   state.raw.routes = await readCsv(zip, "routes.txt");
   state.raw.trips = await readCsv(zip, "trips.txt");
@@ -132,6 +142,25 @@ async function loadGtfs() {
   if (state.raw.agency?.length && state.raw.agency[0].agency_timezone) {
     state.agencyTimezone = state.raw.agency[0].agency_timezone;
   }
+}
+
+async function loadBundledGtfsArchive() {
+  if (!window.TITSA_GTFS_ARCHIVE_B64) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = new URL("./data/Google_transit-embedded.js", document.baseURI).href;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("No se pudo abrir el horario guardado junto a la app."));
+      document.head.appendChild(script);
+    });
+  }
+
+  const archive = window.TITSA_GTFS_ARCHIVE_B64;
+  if (!archive) throw new Error("Falta el horario guardado junto a la app.");
+
+  const zip = await JSZip.loadAsync(archive, { base64: true });
+  window.TITSA_GTFS_ARCHIVE_B64 = "";
+  return zip;
 }
 
 async function fetchGtfsZipData() {
@@ -150,11 +179,7 @@ async function fetchGtfsZipData() {
     }
   }
 
-  throw new Error(
-    `No se pudo cargar GTFS. Prueba colocando Google_transit.zip en /data/Google_transit.zip. Detalle: ${errors.join(
-      " | "
-    )}`
-  );
+  throw new Error(`No se encontró el horario. ${errors.join(" | ")}`);
 }
 
 async function readCsv(zip, filename, optional = false) {
@@ -186,6 +211,10 @@ function buildGlobalIndexes() {
 
   state.stopTimesByTripAll = new Map();
   for (const st of state.raw.stop_times) {
+    const arrivalSec = parseGtfsTime(st.arrival_time);
+    const departureSec = parseGtfsTime(st.departure_time);
+    if (Number.isFinite(arrivalSec)) state.maxServiceTimeSec = Math.max(state.maxServiceTimeSec, arrivalSec);
+    if (Number.isFinite(departureSec)) state.maxServiceTimeSec = Math.max(state.maxServiceTimeSec, departureSec);
     if (!state.stopTimesByTripAll.has(st.trip_id)) state.stopTimesByTripAll.set(st.trip_id, []);
     state.stopTimesByTripAll.get(st.trip_id).push(st);
   }
@@ -238,6 +267,7 @@ function initControls() {
   el.lineOptions.addEventListener("change", () => {
     const picked = el.lineOptions.querySelector("input[name='line_choice']:checked")?.value || CONFIG.initialLines[0];
     state.selectedLines = new Set([picked]);
+    el.linePicker.open = false;
     syncLinePickerLabel();
     applyFiltersAndRender(true);
   });
@@ -280,15 +310,15 @@ function syncLinePickerLabel() {
 
 function requestCurrentLocation() {
   if (!window.isSecureContext) {
-    el.locStatus.textContent = "Ubicacion requiere HTTPS";
+    el.locStatus.textContent = "Para encontrar tu ubicación, abre Ande bus desde su enlace seguro.";
     return;
   }
   if (!navigator.geolocation) {
-    el.locStatus.textContent = "Geolocalizacion no disponible";
+    el.locStatus.textContent = "Este navegador no permite consultar la ubicación.";
     return;
   }
   el.locateBtn.disabled = true;
-  el.locStatus.textContent = "Buscando ubicacion...";
+  el.locStatus.textContent = "Buscando tu ubicación…";
 
   const onSuccess = (pos) => {
     state.currentPos = {
@@ -299,41 +329,50 @@ function requestCurrentLocation() {
     state.currentOriginStopIds = findNearestPlannerStops(state.currentPos.lat, state.currentPos.lon, 8).map((x) => x.stopId);
     const nearest = state.currentOriginStopIds[0];
     const nearestName = nearest ? state.stopById.get(nearest)?.stop_name || nearest : "sin parada";
-    el.locStatus.textContent = `Ubicacion OK (${Math.round(state.currentPos.accuracy)}m) · parada: ${nearestName}`;
+    el.locStatus.textContent = nearest
+      ? `La parada más cercana es ${nearestName}.`
+      : "No encontré paradas cerca de tu ubicación.";
+    updateUserLocationMarker();
     if (nearest) {
-      state.map.setView([state.currentPos.lat, state.currentPos.lon], 13);
+      state.map.setView([state.currentPos.lat, state.currentPos.lon], 15);
     }
     const now = getNowForTimezone(state.agencyTimezone);
     recomputeActiveTripsByService(now);
     renderToConfitalPlanner(now.seconds);
-    renderPlacePlannerResult(now.seconds);
+    refreshDynamicPanels();
     el.locateBtn.disabled = false;
   };
 
-  const onError = (err) => {
-    const msg =
-      err?.code === 1
-        ? "Permiso denegado (activalo en Safari > Configuracion > Ubicacion)"
-        : err?.code === 2
-        ? "Ubicacion no disponible"
-        : "Tiempo agotado al localizar";
-    el.locStatus.textContent = msg;
+  const onError = () => {
+    el.locStatus.textContent = "No pude encontrarte. Comprueba que el móvil permite usar la ubicación e inténtalo otra vez.";
     el.locateBtn.disabled = false;
   };
 
   navigator.geolocation.getCurrentPosition(
     onSuccess,
     onError,
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
   );
+}
 
-  if (state.geolocationWatchId == null) {
-    state.geolocationWatchId = navigator.geolocation.watchPosition(
-      onSuccess,
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 60000, timeout: 20000 }
-    );
+function updateUserLocationMarker() {
+  if (!state.currentPos || !state.map) return;
+  const point = [state.currentPos.lat, state.currentPos.lon];
+  if (state.userLocationMarker) {
+    state.userLocationMarker.setLatLng(point);
+    return;
   }
+  state.userLocationMarker = L.marker(point, {
+    zIndexOffset: 1500,
+    icon: L.divIcon({
+      className: "user-map-icon",
+      html: '<div class="user-location-dot" aria-label="Tu ubicación"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+    }),
+  })
+    .bindPopup("Estás aquí")
+    .addTo(state.map);
 }
 
 function findNearestPlannerStops(lat, lon, limit = 5) {
@@ -355,48 +394,6 @@ function squaredDistance(lat1, lon1, lat2, lon2) {
   return dy * dy + dx * dx;
 }
 
-async function resolvePlaceToNearestStopIds(query) {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=es&q=${encodeURIComponent(
-    `${query}, Tenerife`
-  )}`;
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-    },
-  });
-  if (!res.ok) return "";
-  const data = await res.json();
-  if (!Array.isArray(data) || !data.length) return "";
-  const lat = Number(data[0].lat);
-  const lon = Number(data[0].lon);
-  const nearest = findNearestPlannerStops(lat, lon, 8);
-  return nearest.map((x) => x.stopId);
-}
-
-function renderPlacePlannerResult(nowSec = null) {
-  if (!state.currentOriginStopIds.length || !state.placeTargetStopIds.length) return;
-  const refSec = Number.isFinite(nowSec) ? nowSec : getNowForTimezone(state.agencyTimezone).seconds;
-  const best = findBestRouteFromCurrent(refSec, new Set(state.placeTargetStopIds));
-  if (!best) {
-    el.placeRouteResult.innerHTML = `Destino: ${escapeHtml(state.placeTargetLabel || "lugar")}<br/>Sin ruta ahora`;
-    return;
-  }
-  const originStopName = state.stopById.get(best.originStopId)?.stop_name || best.originStopId;
-  const targetStopName = state.stopById.get(best.targetStopId)?.stop_name || best.targetStopId;
-  const opt = best.option;
-  const approx = opt.fallback ? " (aprox)" : "";
-  if (opt.mode === "direct") {
-    el.placeRouteResult.innerHTML = `Origen: ${escapeHtml(originStopName)}${approx}<br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(
-      opt.line1
-    )}<br/>3) Baja en ${escapeHtml(targetStopName)}`;
-    return;
-  }
-  const transferName = state.stopById.get(opt.transferStopId)?.stop_name || opt.transferStopId;
-  el.placeRouteResult.innerHTML = `Origen: ${escapeHtml(originStopName)}${approx}<br/>1) Espera ${opt.waitMin} min<br/>2) L${escapeHtml(
-    opt.line1
-  )} hasta ${escapeHtml(transferName)}<br/>3) Cambia a L${escapeHtml(opt.line2)}<br/>4) Baja en ${escapeHtml(targetStopName)}`;
-}
-
 function findBestRouteFromCurrent(nowSec, targetStopSet) {
   let best = null;
   for (const originStopId of state.currentOriginStopIds) {
@@ -413,6 +410,7 @@ function findBestRouteFromCurrent(nowSec, targetStopSet) {
 function renderStaticLayers(fitMap = false) {
   state.layers.route.clearLayers();
   state.layers.stops.clearLayers();
+  state.stopMarkers = new Map();
 
   if (!state.filteredTrips.length) {
     if (fitMap) state.map.setView([28.33, -16.51], 11);
@@ -468,27 +466,36 @@ function renderStaticLayers(fitMap = false) {
     const isConfital = state.confitalStops.has(stopId);
     const marker = isConfital
       ? L.marker([lat, lon], {
+          title: s.stop_name || "Parada El Confital",
           zIndexOffset: 800,
           icon: L.divIcon({
             className: "confital-map-icon",
-            html: '<div class="confital-home-marker" aria-label="El Confital">🏠</div>',
-            iconSize: [38, 38],
-            iconAnchor: [19, 19],
+            html: '<div class="confital-stop-hit"><span class="confital-home-marker" aria-label="Parada El Confital">🏠</span></div>',
+            iconSize: [48, 48],
+            iconAnchor: [24, 24],
           }),
         })
-      : L.circleMarker([lat, lon], {
-          radius: 4,
-          color: "#1d4ed8",
-          fillColor: "#60a5fa",
-          fillOpacity: 0.9,
-          weight: 1,
+      : L.marker([lat, lon], {
+          title: s.stop_name || "Parada de guagua",
+          zIndexOffset: 300,
+          icon: L.divIcon({
+            className: "stop-map-icon",
+            html: '<span class="stop-marker-hit"><span class="stop-marker-dot" aria-label="Parada de guagua"></span></span>',
+            iconSize: [48, 48],
+            iconAnchor: [24, 24],
+          }),
         });
 
-    marker.on("click", () => {
-      marker.bindPopup(buildStopPopup(stopId)).openPopup();
+    marker.bindPopup(buildStopPopup(stopId), {
+      className: "busStopPopup",
+      closeButton: true,
+      maxWidth: 340,
+      minWidth: 260,
+      autoPanPadding: [20, 24],
     });
 
     marker.addTo(state.layers.stops);
+    state.stopMarkers.set(stopId, marker);
   }
 
   if (fitMap && bounds.length) {
@@ -518,58 +525,90 @@ function drawHighlightedRoute(points) {
 function refreshDynamicPanels() {
   const now = getNowForTimezone(state.agencyTimezone);
   recomputeActiveTripsByService(now);
-  const activeTrips = computeActiveTrips(now.seconds);
+  updateDataNotice(now);
+
+  if (!isServiceDateDataAvailable(now)) {
+    state.lastUpcomingByStop = new Map();
+    renderConfitalSummary(new Map());
+    renderNearbyStops(new Map());
+    refreshStopPopups();
+    return;
+  }
+
   const upcomingByStop = computeUpcomingByStop(now.seconds);
 
   state.lastUpcomingByStop = upcomingByStop;
 
   renderConfitalSummary(upcomingByStop);
-  renderBusMarkers(activeTrips);
+  renderNearbyStops(upcomingByStop);
+  refreshStopPopups();
+}
+
+function refreshStopPopups() {
+  for (const [stopId, marker] of state.stopMarkers) {
+    marker.setPopupContent(buildStopPopup(stopId));
+  }
+}
+
+function renderNearbyStops(upcomingByStop) {
+  if (!state.currentPos) return;
+
+  const servedStops = new Set();
+  for (const stopTimes of state.filteredStopTimesByTrip.values()) {
+    for (const row of stopTimes) servedStops.add(row.stop_id);
+  }
+
+  const nearest = [...servedStops]
+    .map((stopId) => {
+      const stop = state.stopById.get(stopId);
+      if (!stop) return null;
+      return {
+        stopId,
+        distance: squaredDistance(
+          state.currentPos.lat,
+          state.currentPos.lon,
+          Number(stop.stop_lat),
+          Number(stop.stop_lon)
+        ),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3)
+    .map((item) => item.stopId);
+
+  if (!nearest.length) {
+    el.nearbyStops.innerHTML = '<p class="nearbyEmpty">Esta línea no tiene paradas en el horario cargado.</p>';
+    return;
+  }
+
+  el.nearbyStops.innerHTML = nearest
+    .map((stopId) => {
+      const stopName = state.stopById.get(stopId)?.stop_name || stopId;
+      const next = (upcomingByStop.get(stopId) || [])[0];
+      if (!next) {
+        return `<article class="nearbyStop"><div><div class="nearbyStopName">${escapeHtml(
+          stopName
+        )}</div><div class="nearbyStopMeta">Línea ${escapeHtml([...state.selectedLines].join(", "))}</div></div><span class="nearbyEta">Sin salida</span></article>`;
+      }
+
+      return `<article class="nearbyStop"><div><div class="nearbyStopName">${escapeHtml(
+        stopName
+      )}</div><div class="nearbyStopMeta">${escapeHtml(next.headsign || next.direction)}</div></div><span class="nearbyEta"><strong>${
+        next.etaMin
+      }</strong> min</span></article>`;
+    })
+    .join("");
 }
 
 function recomputeActiveTripsByService(now) {
   state.activeServiceIds = getActiveServiceIds(now.dateYYYYMMDD, now.weekday);
-  state.activeTripIds = new Set(state.allTrips.filter((t) => state.activeServiceIds.has(t.service_id)).map((t) => t.trip_id));
-}
-
-function computeActiveTrips(nowSec) {
-  const tripMeta = new Map(state.filteredTrips.map((t) => [t.trip_id, t]));
-  const list = [];
-
-  for (const [tripId, arr] of state.filteredStopTimesByTrip.entries()) {
-    const meta = tripMeta.get(tripId);
-    if (!meta || !state.activeServiceIds.has(meta.service_id)) continue;
-
-    const first = parseGtfsTime(arr[0].departure_time || arr[0].arrival_time);
-    const last = parseGtfsTime(arr[arr.length - 1].arrival_time || arr[arr.length - 1].departure_time);
-
-    if (!Number.isFinite(first) || !Number.isFinite(last)) continue;
-    if (nowSec < first || nowSec > last) continue;
-
-    let nextIdx = arr.findIndex((row) => parseGtfsTime(row.arrival_time || row.departure_time) >= nowSec);
-    if (nextIdx < 0) nextIdx = arr.length - 1;
-
-    const nextStopRow = arr[nextIdx];
-    const nextEtaSec = parseGtfsTime(nextStopRow.arrival_time || nextStopRow.departure_time) - nowSec;
-    const etaMin = Math.max(0, Math.ceil(nextEtaSec / 60));
-
-    const nextStop = state.stopById.get(nextStopRow.stop_id);
-    const progress = Math.min(1, Math.max(0, (nowSec - first) / Math.max(1, last - first)));
-
-    list.push({
-      tripId,
-      line: state.routeById.get(meta.route_id)?.route_short_name || "?",
-      headsign: meta.trip_headsign || "Sin headsign",
-      direction: directionLabel(meta.direction_id),
-      nextStopName: nextStop?.stop_name || nextStopRow.stop_id,
-      etaMin,
-      progress,
-      pos: estimateTripPosition(arr, nowSec),
-    });
-  }
-
-  list.sort((a, b) => a.etaMin - b.etaMin);
-  return list;
+  const previousDay = getPreviousServiceDay(now.dateYYYYMMDD);
+  state.previousActiveServiceIds = isFeedDateCovered(previousDay.date)
+    ? getActiveServiceIds(previousDay.date, previousDay.weekday)
+    : new Set();
+  const activeServiceIds = new Set([...state.activeServiceIds, ...state.previousActiveServiceIds]);
+  state.activeTripIds = new Set(state.allTrips.filter((t) => activeServiceIds.has(t.service_id)).map((t) => t.trip_id));
 }
 
 function computeUpcomingByStop(nowSec) {
@@ -577,30 +616,43 @@ function computeUpcomingByStop(nowSec) {
   const upcomingByStop = new Map();
   const horizon = nowSec + CONFIG.minutesWindow * 60;
 
-  for (const [tripId, arr] of state.filteredStopTimesByTrip.entries()) {
-    const meta = tripMeta.get(tripId);
-    if (!meta || !state.activeServiceIds.has(meta.service_id)) continue;
-
-    for (const row of arr) {
-      const arrSec = parseGtfsTime(row.arrival_time || row.departure_time);
-      if (!Number.isFinite(arrSec) || arrSec < nowSec || arrSec > horizon) continue;
-
-      const etaMin = Math.max(0, Math.ceil((arrSec - nowSec) / 60));
-      if (!upcomingByStop.has(row.stop_id)) upcomingByStop.set(row.stop_id, []);
-      upcomingByStop.get(row.stop_id).push({
-        etaMin,
-        tripId,
-        headsign: meta.trip_headsign || "Sin headsign",
-        direction: directionLabel(meta.direction_id),
-      });
-    }
-  }
+  addUpcomingTrips(upcomingByStop, tripMeta, state.activeServiceIds, 0, nowSec, horizon);
+  addUpcomingTrips(upcomingByStop, tripMeta, state.previousActiveServiceIds, 86400, nowSec, horizon);
 
   for (const [, items] of upcomingByStop) {
     items.sort((a, b) => a.etaMin - b.etaMin);
   }
 
   return upcomingByStop;
+}
+
+function addUpcomingTrips(upcomingByStop, tripMeta, activeServiceIds, serviceTimeOffset, nowSec, horizon) {
+  const scheduleNow = nowSec + serviceTimeOffset;
+  const scheduleHorizon = horizon + serviceTimeOffset;
+
+  for (const [tripId, arr] of state.filteredStopTimesByTrip) {
+    const meta = tripMeta.get(tripId);
+    if (!meta || !activeServiceIds.has(meta.service_id)) continue;
+    const destination = meta.trip_headsign ||
+      state.stopById.get(arr[arr.length - 1]?.stop_id)?.stop_name ||
+      "Destino no indicado";
+
+    for (const row of arr) {
+      const arrivalSec = parseGtfsTime(row.arrival_time || row.departure_time);
+      if (!Number.isFinite(arrivalSec) || arrivalSec < scheduleNow || arrivalSec > scheduleHorizon) continue;
+      if (serviceTimeOffset > 0 && arrivalSec < 86400) continue;
+
+      const etaMin = Math.max(0, Math.ceil((arrivalSec - scheduleNow) / 60));
+      if (!upcomingByStop.has(row.stop_id)) upcomingByStop.set(row.stop_id, []);
+      upcomingByStop.get(row.stop_id).push({
+        etaMin,
+        tripId,
+        line: state.routeById.get(meta.route_id)?.route_short_name || [...state.selectedLines].join(", "),
+        headsign: destination,
+        direction: directionLabel(meta.direction_id),
+      });
+    }
+  }
 }
 
 function renderConfitalSummary(upcomingByStop) {
@@ -624,7 +676,7 @@ function renderConfitalSummary(upcomingByStop) {
 
   const anyEta = rows.some((r) => r.items.length);
   if (!anyEta) {
-    el.confitalSummary.innerHTML = "Sin ETAs para este filtro";
+    el.confitalSummary.innerHTML = '<p class="confitalEmpty">No hay salidas próximas en el horario para hoy.</p>';
     return;
   }
 
@@ -632,51 +684,48 @@ function renderConfitalSummary(upcomingByStop) {
     .map((row) => {
       const fixedDest = CONFIG.confitalDirectionByStop[row.stopId] || "Destino";
       if (!row.items.length) {
-        return `<article class="confitalRow"><h3>🏠 ${escapeHtml(row.stopName)} (${escapeHtml(
-          row.stopId
-        )})</h3><p>${escapeHtml(fixedDest)}</p><p>Sin ETA</p></article>`;
+        return `<article class="confitalRow"><div><h3>🏠 ${escapeHtml(row.stopName)}</h3><p>${escapeHtml(
+          fixedDest
+        )} · Sin salida próxima</p></div></article>`;
       }
 
       const first = row.items[0];
-      const later = row.items
-        .slice(1)
-        .map((it) => `${it.etaMin}m`)
-        .join(" · ");
-      return `<article class="confitalRow"><h3>🏠 ${escapeHtml(row.stopName)} (${escapeHtml(
-        row.stopId
-      )})</h3><p>${escapeHtml(fixedDest)}</p><p><span class="confitalEta">${first.etaMin} min</span> · ${escapeHtml(
-        later ? `Después: ${later}` : "Sin más llegadas próximas"
-      )}</p></article>`;
+      const later = row.items.slice(1).map((it) => `${it.etaMin} min`).join(" · ");
+      return `<article class="confitalRow"><div><h3>🏠 ${escapeHtml(row.stopName)}</h3><p>${escapeHtml(
+        fixedDest
+      )}</p></div><p class="confitalEta">${first.etaMin} min</p>${
+        later ? `<p>Después: ${escapeHtml(later)}</p>` : ""
+      }</article>`;
     })
     .join("");
 }
 
 function renderToConfitalPlanner(nowSec) {
+  el.toConfitalResult.hidden = !state.currentOriginStopIds.length;
   if (!state.currentOriginStopIds.length) {
-    el.toConfitalResult.textContent = "Pulsa: Usar mi ubicacion";
     return;
   }
   const best = findBestRouteFromCurrent(nowSec, state.confitalStops);
   if (!best) {
-    el.toConfitalResult.innerHTML = "Sin ruta ahora";
+    el.toConfitalResult.innerHTML = "No encuentro una ruta próxima desde aquí hasta El Confital.";
     return;
   }
   const fromStopName = state.stopById.get(best.originStopId)?.stop_name || best.originStopId;
   const opt = best.option;
   const dest = CONFIG.confitalDirectionByStop[best.targetStopId] || "El Confital";
-  const head = `Opcion: ${opt.totalMin} min${opt.fallback ? " (aprox)" : ""}`;
+  const head = `En horario: ${opt.totalMin} min${opt.fallback ? " (aprox.)" : ""}`;
   if (opt.mode === "direct") {
-    el.toConfitalResult.innerHTML = `<strong>${head}</strong><br/>Origen: ${escapeHtml(
+    el.toConfitalResult.innerHTML = `<strong>Ruta hasta El Confital</strong><br/>${head}<br/>Desde ${escapeHtml(
       fromStopName
-    )}<br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(opt.line1)}<br/>3) Baja en ${escapeHtml(dest)}`;
+    )}: espera ${opt.waitMin} min y toma la línea ${escapeHtml(opt.line1)} hasta ${escapeHtml(dest)}.`;
     return;
   }
   const transferName = state.stopById.get(opt.transferStopId)?.stop_name || opt.transferStopId;
-  el.toConfitalResult.innerHTML = `<strong>${head}</strong><br/>Origen: ${escapeHtml(
+  el.toConfitalResult.innerHTML = `<strong>Ruta hasta El Confital</strong><br/>${head}<br/>Desde ${escapeHtml(
     fromStopName
-  )}<br/>1) Espera ${opt.waitMin} min<br/>2) Toma L${escapeHtml(opt.line1)} hasta ${escapeHtml(
+  )}: espera ${opt.waitMin} min, toma la línea ${escapeHtml(opt.line1)} hasta ${escapeHtml(
     transferName
-  )}<br/>3) Cambia a L${escapeHtml(opt.line2)}<br/>4) Baja en ${escapeHtml(dest)}`;
+  )} y cambia a la línea ${escapeHtml(opt.line2)} para llegar a ${escapeHtml(dest)}.`;
 }
 
 function getBestTripsToTargets(nowSec, fromStopId, targetStopSet) {
@@ -840,108 +889,37 @@ function getCandidateDepartures(stopId, earliestSec, opts = {}) {
   return out.slice(0, limit);
 }
 
-function renderBusMarkers(activeTrips) {
-  state.layers.buses.clearLayers();
-
-  for (const t of activeTrips) {
-    if (!t.pos) continue;
-
-    const marker = L.marker([t.pos.lat, t.pos.lon], {
-      zIndexOffset: 1000,
-      icon: L.divIcon({
-        className: "bus-map-icon",
-        html: `<div class="bus-marker">
-          <div class="bus-marker-symbol" aria-hidden="true">
-            <span class="bus-marker-arrow" style="transform: rotate(${t.pos.bearing}deg)">➤</span>
-            <span class="bus-marker-emoji">🚌</span>
-          </div>
-          <div class="bus-marker-connector" aria-hidden="true"></div>
-          <div class="bus-marker-label"><strong>L${escapeHtml(t.line)}</strong><span>Hacia ${escapeHtml(
-          t.headsign
-        )}</span></div>
-        </div>`,
-        iconSize: [160, 96],
-        iconAnchor: [80, 24],
-      }),
-    });
-
-    marker.bindPopup(
-      `<strong>Viaje ${escapeHtml(t.tripId)}</strong><br/>Destino: ${escapeHtml(t.headsign)}<br/>Sentido: ${escapeHtml(
-        t.direction
-      )}<br/>ETA prox. parada: ${t.etaMin} min`
-    );
-
-    marker.addTo(state.layers.buses);
-  }
-}
-
 function buildStopPopup(stopId) {
   const stop = state.stopById.get(stopId);
   const items = state.lastUpcomingByStop.get(stopId) || [];
-  const fixedDest = CONFIG.confitalDirectionByStop[stopId] || "";
+  const line = [...state.selectedLines].sort(sortLineNames).join(", ") || "—";
+  const stopNumber = stop?.stop_code || stopId;
+  const title = escapeHtml(stop?.stop_name || "Parada de guagua");
   if (!items.length) {
-    return `<strong>${escapeHtml(stop?.stop_name || stopId)}</strong><br/>Parada: ${escapeHtml(
-      stopId
-    )}<br/>${fixedDest ? `Destino: ${escapeHtml(fixedDest)}<br/>` : ""}Sin ETA.`;
+    return `<div class="stopPopup"><p class="stopPopupKicker">PARADA ${escapeHtml(
+      stopNumber
+    )}</p><h2 class="stopPopupTitle">${title}</h2><div class="stopEmpty">No hay salidas próximas para la línea ${escapeHtml(
+      line
+    )} en el horario de hoy.</div><p class="stopPopupFoot">Puede haber cambios o retrasos.</p></div>`;
   }
 
   const rows = items
-    .slice(0, 6)
-    .map((it) => `<li>${it.etaMin} min | ${escapeHtml(it.headsign)}</li>`)
+    .slice(0, 5)
+    .map((it) => {
+      const eta = it.etaMin === 0 ? "Ahora" : String(it.etaMin);
+      const unit = it.etaMin === 0 ? "" : "min";
+      const caption = it.etaMin === 0 ? "LLEGADA" : "LLEGA EN";
+      return `<li class="stopArrival"><span class="stopLineBadge">Línea ${escapeHtml(
+        it.line || line
+      )}</span><span class="stopDestination"><span class="stopFieldLabel">Destino</span><strong>${escapeHtml(
+        it.headsign || "Sin destino indicado"
+      )}</strong></span><span class="stopEta"><span class="stopEtaCaption">${caption}</span><strong>${eta}</strong><span class="stopEtaUnit">${unit}</span></span></li>`;
+    })
     .join("");
 
-  return `<strong>${escapeHtml(stop?.stop_name || stopId)}</strong><br/>Parada: ${escapeHtml(
-    stopId
-  )}<br/>${fixedDest ? `Destino: ${escapeHtml(fixedDest)}<br/>` : ""}<ul style="margin:6px 0 0 18px; padding:0;">${rows}</ul>`;
-}
-
-function estimateTripPosition(stopTimes, nowSec) {
-  if (!stopTimes.length) return null;
-
-  let prev = stopTimes[0];
-  let next = stopTimes[stopTimes.length - 1];
-
-  for (let i = 1; i < stopTimes.length; i++) {
-    const curr = stopTimes[i];
-    const currT = parseGtfsTime(curr.arrival_time || curr.departure_time);
-    if (currT >= nowSec) {
-      next = curr;
-      prev = stopTimes[i - 1];
-      break;
-    }
-  }
-
-  const prevStop = state.stopById.get(prev.stop_id);
-  const nextStop = state.stopById.get(next.stop_id);
-  if (!prevStop || !nextStop) return null;
-
-  const t0 = parseGtfsTime(prev.departure_time || prev.arrival_time);
-  const t1 = parseGtfsTime(next.arrival_time || next.departure_time);
-  const ratio = t1 > t0 ? (nowSec - t0) / (t1 - t0) : 0;
-  const clamped = Math.min(1, Math.max(0, ratio));
-
-  const lat0 = Number(prevStop.stop_lat);
-  const lon0 = Number(prevStop.stop_lon);
-  const lat1 = Number(nextStop.stop_lat);
-  const lon1 = Number(nextStop.stop_lon);
-
-  if (![lat0, lon0, lat1, lon1].every(Number.isFinite)) return null;
-
-  return {
-    lat: lat0 + (lat1 - lat0) * clamped,
-    lon: lon0 + (lon1 - lon0) * clamped,
-    bearing: bearingBetweenPoints(lat0, lon0, lat1, lon1),
-  };
-}
-
-function bearingBetweenPoints(lat0, lon0, lat1, lon1) {
-  const toRad = (value) => (value * Math.PI) / 180;
-  const y = Math.sin(toRad(lon1 - lon0)) * Math.cos(toRad(lat1));
-  const x =
-    Math.cos(toRad(lat0)) * Math.sin(toRad(lat1)) -
-    Math.sin(toRad(lat0)) * Math.cos(toRad(lat1)) * Math.cos(toRad(lon1 - lon0));
-  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
-  return Number.isFinite(bearing) ? (bearing + 360) % 360 : 0;
+  return `<div class="stopPopup"><p class="stopPopupKicker">PARADA ${escapeHtml(
+    stopNumber
+  )}</p><h2 class="stopPopupTitle">${title}</h2><p class="stopPopupSubheading">Próximas guaguas</p><ul class="stopArrivalList">${rows}</ul><p class="stopPopupFoot">Minutos según el horario; puede haber retrasos.</p></div>`;
 }
 
 function getActiveServiceIds(dateYYYYMMDD, weekday) {
@@ -966,11 +944,85 @@ function getActiveServiceIds(dateYYYYMMDD, weekday) {
     if (String(d.exception_type) === "2") base.delete(d.service_id);
   }
 
-  if (!base.size) {
-    for (const t of state.filteredTrips) base.add(t.service_id);
+  return base;
+}
+
+function getFeedServiceDateRange() {
+  const dates = [];
+
+  for (const calendar of state.raw.calendar) {
+    if (/^\d{8}$/.test(calendar.start_date || "")) dates.push(calendar.start_date);
+    if (/^\d{8}$/.test(calendar.end_date || "")) dates.push(calendar.end_date);
+  }
+  for (const exception of state.raw.calendar_dates) {
+    if (/^\d{8}$/.test(exception.date || "")) dates.push(exception.date);
   }
 
-  return base;
+  if (!dates.length) return null;
+  dates.sort();
+  return { start: dates[0], end: dates[dates.length - 1] };
+}
+
+function isFeedDateCovered(dateYYYYMMDD) {
+  const range = state.feedServiceRange;
+  return Boolean(range && dateYYYYMMDD >= range.start && dateYYYYMMDD <= range.end);
+}
+
+function getPreviousServiceDay(dateYYYYMMDD) {
+  const [, year, month, day] = dateYYYYMMDD.match(/^(\d{4})(\d{2})(\d{2})$/) || [];
+  if (!year) return { date: "", weekday: "" };
+
+  const previous = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)) - 86400000);
+  const y = previous.getUTCFullYear();
+  const m = String(previous.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(previous.getUTCDate()).padStart(2, "0");
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return { date: `${y}${m}${d}`, weekday: weekdays[previous.getUTCDay()] };
+}
+
+function isServiceDateDataAvailable(now) {
+  if (isFeedDateCovered(now.dateYYYYMMDD)) return true;
+
+  const overnightWindowSec = Math.max(0, state.maxServiceTimeSec - 86400);
+  if (now.seconds >= overnightWindowSec) return false;
+  return isFeedDateCovered(getPreviousServiceDay(now.dateYYYYMMDD).date);
+}
+
+function updateDataNotice(now = getNowForTimezone(state.agencyTimezone)) {
+  const range = state.feedServiceRange;
+  const available = isServiceDateDataAvailable(now);
+  el.dataNotice.hidden = false;
+  el.dataNotice.classList.toggle("isStale", !available);
+
+  if (!range) {
+    el.dataNotice.textContent = "No pude comprobar la vigencia del horario.";
+    return;
+  }
+
+  const start = formatGtfsDate(range.start);
+  const end = formatGtfsDate(range.end);
+  if (!isFeedDateCovered(now.dateYYYYMMDD) && available) {
+    el.dataNotice.textContent = `Horario oficial hasta ${end}. Solo aparecen guaguas que siguen de ayer.`;
+    return;
+  }
+  if (!available) {
+    el.dataNotice.innerHTML = `Horario vencido (${start}–${end}); no hay datos fiables para hoy. <a href="https://www.titsa.com/Google_transit.zip" target="_blank" rel="noopener">Descargar horario nuevo</a>.`;
+    return;
+  }
+
+  el.dataNotice.textContent = "";
+  el.dataNotice.hidden = true;
+}
+
+function formatGtfsDate(date) {
+  const [, year, month, day] = date.match(/^(\d{4})(\d{2})(\d{2})$/) || [];
+  if (!year) return date;
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
 }
 
 function getNowForTimezone(timeZone) {
